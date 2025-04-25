@@ -8,7 +8,7 @@ api-enabled-servers:
 database:
   host: "localhost"
   port: 3306
-  name: "content_db_replica"
+  name: "jobskill_db"
   user: "root"
   password: ""
 redis:

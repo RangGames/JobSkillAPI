@@ -1,4 +1,4 @@
-name: JobSkillAPI
-version: '1.0-SNAPSHOT'
+name: ${project.name}
+version: '${project.version}'
 main: games.rang.jobSkillAPI.JobSkillPlugin
 api-version: '1.21'

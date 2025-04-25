@@ -26,15 +26,15 @@ public class DatabaseHandler implements AutoCloseable {
         CREATE TABLE IF NOT EXISTS `Content_Types` (
             `content_id` INT AUTO_INCREMENT PRIMARY KEY,
             `content_name` VARCHAR(100) NOT NULL UNIQUE,
-            `description` TEXT NULLABLE
+            `description` TEXT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """;
     private static final String CREATE_JOBS_TABLE = """
         CREATE TABLE IF NOT EXISTS `Jobs` (
             `job_id` INT AUTO_INCREMENT PRIMARY KEY,
             `job_name` VARCHAR(100) NOT NULL UNIQUE,
-            `description` TEXT NULLABLE,
-            `required_content_id` INT NULLABLE,
+            `description` TEXT NULL,
+            `required_content_id` INT NULL,
             `required_content_level` INT NOT NULL DEFAULT 1,
             FOREIGN KEY (`required_content_id`) REFERENCES `Content_Types`(`content_id`) ON DELETE SET NULL ON UPDATE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -43,7 +43,7 @@ public class DatabaseHandler implements AutoCloseable {
         CREATE TABLE IF NOT EXISTS `Skills` (
             `skill_id` INT AUTO_INCREMENT PRIMARY KEY,
             `skill_name` VARCHAR(100) NOT NULL UNIQUE,
-            `description` TEXT NULLABLE,
+            `description` TEXT NULL,
             `max_level` INT NOT NULL DEFAULT 10,
             `associated_job_id` INT NOT NULL,
             FOREIGN KEY (`associated_job_id`) REFERENCES `Jobs`(`job_id`) ON DELETE CASCADE ON UPDATE CASCADE
@@ -66,7 +66,7 @@ public class DatabaseHandler implements AutoCloseable {
         CREATE TABLE IF NOT EXISTS `Player_Season_Stats` (
             `player_uuid` VARCHAR(36) NOT NULL,
             `season_id` VARCHAR(10) NOT NULL,
-            `chosen_job_id` INT NULLABLE,
+            `chosen_job_id` INT NULL,
             `skill_points` INT NOT NULL DEFAULT 0,
             PRIMARY KEY (`player_uuid`, `season_id`),
             FOREIGN KEY (`chosen_job_id`) REFERENCES `Jobs`(`job_id`) ON DELETE SET NULL ON UPDATE CASCADE
