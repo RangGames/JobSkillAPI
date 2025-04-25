@@ -1,0 +1,4 @@
+name: JobSkillAPI
+version: '1.0-SNAPSHOT'
+main: games.rang.jobSkillAPI.JobSkillPlugin
+api-version: '1.21'

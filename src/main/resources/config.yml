@@ -1,0 +1,37 @@
+server-name: "lobby"
+lobby-server-name: "lobby"
+api-enabled-servers:
+  - "lobby"
+  - "rpg"
+  - "island"
+  - "collect"
+database:
+  host: "localhost"
+  port: 3306
+  name: "content_db_replica"
+  user: "root"
+  password: ""
+redis:
+  enabled: true
+  host: "localhost"
+  port: 6379
+  password: ""
+  database: 0
+  channel: "jobskill:season_reset"
+
+content-level-requirements: # 수정 중인 부분
+  # 기본 요구 경험치
+  default:
+    - { level: 2, experience: 100 }
+    - { level: 3, experience: 250 }
+    - { level: 4, experience: 500 }
+    - { level: 5, experience: 1000 }
+  # 컨텐츠 ID 1 (예: 채광) 요구 경험치
+  '1':
+    - { level: 2, experience: 120 }
+    - { level: 3, experience: 300 }
+    - { level: 4, experience: 650 }
+  # 컨텐츠 ID 2 (예: 사냥) 요구 경험치
+  '2':
+    - { level: 2, experience: 80 }
+    - { level: 3, experience: 200 }
