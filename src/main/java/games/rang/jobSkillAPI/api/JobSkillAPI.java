@@ -148,6 +148,65 @@ public class JobSkillAPI {
         return storage.getLoadedPlayerData(playerUUID).map(PlayerSeasonData::getSkillLevelMap).orElse(Collections.emptyMap());
     }
 
+    /**
+     * Gets the total cumulative experience required to reach the specified target level for a specific content type.
+     * Calculation is based on the settings in config.yml.
+     *
+     * @param contentId The ID of the content type.
+     * @param targetLevel The target level (must be 1 or greater).
+     * @return The total cumulative experience required, or -1 if the requirement for the target level is not defined.
+     */
+    public long getTotalExperienceRequired(int contentId, int targetLevel) {
+        if (targetLevel < 1) return 0;
+        return staticDataManager.getTotalExperienceRequired(contentId, targetLevel);
+    }
+
+    /**
+     * Gets the additional experience needed to level up from the current level to the next level for a specific content type.
+     * Calculation is based on the settings in config.yml.
+     *
+     * @param contentId The ID of the content type.
+     * @param currentLevel The current level (must be 1 or greater).
+     * @return The additional experience required for the next level, or -1 if the next level is not defined or a configuration error occurs.
+     */
+    public long getExperienceForNextLevel(int contentId, int currentLevel) {
+        if (currentLevel < 1) return -1;
+        return staticDataManager.getExperienceRequiredForNextLevel(contentId, currentLevel);
+    }
+
+    /**
+     * Calculates the remaining experience required for the player to reach the next level in a specific content type.
+     *
+     * @param playerUUID The UUID of the player.
+     * @param contentId The ID of the content type.
+     * @return The remaining experience needed for the next level, or -1 if the next level is not defined or player data could not be loaded.
+     */
+    public long getExperienceRemainingForNextLevel(UUID playerUUID, int contentId) {
+        Optional<PlayerSeasonData> dataOpt = storage.getLoadedPlayerData(playerUUID);
+        if (dataOpt.isEmpty()) {
+            return -1;
+        }
+        PlayerSeasonData data = dataOpt.get();
+        int currentLevel = data.getContentLevel(contentId);
+        long currentExperience = data.getContentExperience(contentId);
+
+        long requiredForNext = getExperienceForNextLevel(contentId, currentLevel);
+        if (requiredForNext == -1) {
+            return -1;
+        }
+
+        long currentLevelStartExp = getTotalExperienceRequired(contentId, currentLevel);
+        if (currentLevelStartExp == -1 && currentLevel != 1) {
+            logger.warn("Could not determine start experience for level {} (contentId {}) for player {}. Remaining calculation might be inaccurate.", currentLevel, contentId, playerUUID);
+            return -1;
+        }
+
+        long progressInCurrentLevel = currentExperience - currentLevelStartExp;
+        long remaining = requiredForNext - progressInCurrentLevel;
+
+        return Math.max(0, remaining);
+    }
+
     // --- Data Modification Methods ---
 
     /**

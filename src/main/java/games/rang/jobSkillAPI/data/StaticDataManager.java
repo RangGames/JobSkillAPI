@@ -154,6 +154,54 @@ public class StaticDataManager {
     }
 
     /**
+     * Returns the total cumulative experience required to reach the specified target level for a specific content type.
+     * Level 1 requires 0 experience.
+     * Based on settings in config.yml.
+     *
+     * @param contentId The ID of the content type.
+     * @param targetLevel The target level (must be 1 or greater).
+     * @return The total cumulative experience required, or -1 if the target level requirement is not defined or invalid.
+     */
+    public long getTotalExperienceRequired(int contentId, int targetLevel) {
+        if (targetLevel <= 1) {
+            return 0;
+        }
+        List<ConfigManager.LevelRequirement> requirements = configManager.getLevelRequirements(contentId);
+        for (ConfigManager.LevelRequirement req : requirements) {
+            if (req.level() == targetLevel) {
+                return req.experience();
+            }
+        }
+        logger.warn("No experience requirement found for contentId {} at level {}", contentId, targetLevel);
+        return -1;
+    }
+
+    /**
+     * Returns the additional experience needed to level up from the current level to the next level for a specific content type.
+     * Based on settings in config.yml.
+     *
+     * @param contentId The ID of the content type.
+     * @param currentLevel The player's current level (must be 1 or greater).
+     * @return The additional experience required for the next level, or -1 if the next level is not defined (max level reached) or a configuration error occurs.
+     */
+    public long getExperienceRequiredForNextLevel(int contentId, int currentLevel) {
+        if (currentLevel < 1) return -1;
+
+        long currentLevelTotalExp = getTotalExperienceRequired(contentId, currentLevel);
+        long nextLevelTotalExp = getTotalExperienceRequired(contentId, currentLevel + 1);
+
+        if (nextLevelTotalExp == -1) {
+            logger.debug("No next level requirement found for contentId {} from level {}", contentId, currentLevel);
+            return -1;
+        }
+        if (currentLevelTotalExp == -1 && currentLevel != 1) {
+            logger.warn("Could not find total experience for current level {} (contentId {}). Cannot calculate next level requirement.", currentLevel, contentId);
+            return -1;
+        }
+        return nextLevelTotalExp - currentLevelTotalExp;
+    }
+
+    /**
      * Calculates the cost (e.g., skill points) required to level up a skill to the next level.
      * Placeholder implementation - needs specific game logic.
      * @param skillId The ID of the skill.
