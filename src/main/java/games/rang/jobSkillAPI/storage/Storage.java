@@ -62,7 +62,7 @@ public class Storage {
 
     /**
      * Gets the current season ID. Returns the overridden ID if set, otherwise calculates based on the current date.
-     * Example format: "YYYY-QN" (e.g., "2024-Q3").
+     * Example format: "YYYY-QN" (e.g., "2025-Q3").
      * @return The current season ID string.
      */
     public String getCurrentSeasonId() {

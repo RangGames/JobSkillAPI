@@ -46,9 +46,9 @@ public class ConfigManager {
         FileConfiguration config = plugin.getConfig(); // Load the config
 
         // --- Define Default Values ---
-        config.addDefault("server-name", "MyServer"); // MUST be set correctly for this server
+        config.addDefault("server-name", "lobby"); // MUST be set correctly for this server
         config.addDefault("lobby-server-name", "lobby");
-        config.addDefault("api-enabled-servers", List.of("MyServer", "GameServer1")); // Servers using this plugin's API/data
+        config.addDefault("api-enabled-servers", List.of("lobby", "rpg")); // Servers using this plugin's API/data
         config.addDefault("database.host", "localhost");
         config.addDefault("database.port", 3306);
         config.addDefault("database.name", "jobskill_db");
@@ -76,7 +76,7 @@ public class ConfigManager {
         }
         // --- End Default Values ---
 
-        config.options().copyDefaults(true); // Add defaults to config if missing
+        //config.options().copyDefaults(true); // Add defaults to config if missing
         plugin.saveConfig(); // Save changes (mainly useful on first run)
 
         // --- Load Values ---

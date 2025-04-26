@@ -177,8 +177,8 @@ public class DatabaseHandler implements AutoCloseable {
         hikariConfig.setMaximumPoolSize(15); // Adjust pool size as needed
         hikariConfig.setMinimumIdle(5);
         hikariConfig.setConnectionTimeout(30000); // 30 seconds
-        hikariConfig.setIdleTimeout(600000); // 10 minutes
-        hikariConfig.setMaxLifetime(1800000); // 30 minutes
+        hikariConfig.setIdleTimeout(60000); // 1 minutes
+        hikariConfig.setMaxLifetime(180000); // 3 minutes
         // Performance optimizations for MySQL
         hikariConfig.addDataSourceProperty("cachePrepStmts", "true");
         hikariConfig.addDataSourceProperty("prepStmtCacheSize", "250");

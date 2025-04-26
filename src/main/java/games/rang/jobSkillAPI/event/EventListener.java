@@ -13,10 +13,9 @@ import games.rang.jobSkillAPI.api.JobSkillAPI;
 import games.rang.jobSkillAPI.config.ConfigManager;
 import games.rang.jobSkillAPI.log.TransactionLogger;
 import games.rang.jobSkillAPI.storage.Storage;
-import rang.games.allPlayersUtil.event.NetworkQuitEvent; // Custom event import
+import rang.games.allPlayersUtil.event.NetworkQuitEvent;
 
 import java.util.UUID;
-// Removed unused CompletableFuture import
 
 /**
  * Handles various Bukkit player events (Join, Quit, Move) and a custom

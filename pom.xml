@@ -6,7 +6,7 @@
 
     <groupId>games.rang</groupId>
     <artifactId>JobSkillAPI</artifactId>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.2-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>JobSkillAPI</name>
@@ -77,10 +77,11 @@
             <version>5.1.0</version>
         </dependency>
         <dependency>
-            <groupId>rang.games</groupId>
+            <groupId>games.rang</groupId>
             <artifactId>allplayersutil</artifactId>
             <version>2.0.4.7-SNAPSHOT</version>
-            <scope>provided</scope>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/libs/allplayersutil-2.0.4.7-SNAPSHOT.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>com.github.SkriptLang</groupId>
