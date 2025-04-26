@@ -68,6 +68,7 @@ public class DatabaseHandler implements AutoCloseable {
             `season_id` VARCHAR(10) NOT NULL,
             `chosen_job_id` INT NULL,
             `skill_points` INT NOT NULL DEFAULT 0,
+            `class` INT NOT NULL DEFAULT 1,
             PRIMARY KEY (`player_uuid`, `season_id`),
             FOREIGN KEY (`chosen_job_id`) REFERENCES `Jobs`(`job_id`) ON DELETE SET NULL ON UPDATE CASCADE
             -- Optional FK to a Players table if needed
@@ -109,15 +110,15 @@ public class DatabaseHandler implements AutoCloseable {
         """;
 
     // --- Player Data Loading Queries ---
-    private static final String LOAD_PLAYER_SEASON_STATS = "SELECT chosen_job_id, skill_points FROM Player_Season_Stats WHERE player_uuid = ? AND season_id = ?";
+    private static final String LOAD_PLAYER_SEASON_STATS = "SELECT chosen_job_id, skill_points, class FROM Player_Season_Stats WHERE player_uuid = ? AND season_id = ?";
     private static final String LOAD_PLAYER_CONTENT_PROGRESS = "SELECT content_id, experience, level FROM Player_Content_Progress WHERE player_uuid = ? AND season_id = ?";
     private static final String LOAD_PLAYER_SKILL_LEVELS = "SELECT skill_id, level FROM Player_Skill_Levels WHERE player_uuid = ? AND season_id = ?";
 
     // --- Player Data Saving Queries (UPSERT/DELETE) ---
     private static final String UPSERT_PLAYER_SEASON_STATS = """
-        INSERT INTO Player_Season_Stats (player_uuid, season_id, chosen_job_id, skill_points)
-        VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE chosen_job_id = VALUES(chosen_job_id), skill_points = VALUES(skill_points);
+        INSERT INTO Player_Season_Stats (player_uuid, season_id, chosen_job_id, skill_points, class)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE chosen_job_id = VALUES(chosen_job_id), skill_points = VALUES(skill_points), class = VALUES(class);
         """;
     private static final String UPSERT_PLAYER_CONTENT_PROGRESS = """
         INSERT INTO Player_Content_Progress (player_uuid, content_id, season_id, experience, level)
@@ -303,7 +304,7 @@ public class DatabaseHandler implements AutoCloseable {
                     ResultSet rs = pstmt.executeQuery();
                     if (rs.next()) {
                         Integer jobId = (Integer) rs.getObject("chosen_job_id");
-                        seasonData.setSeasonStats(new PlayerSeasonStats(playerUUID, seasonId, jobId, rs.getInt("skill_points")));
+                        seasonData.setSeasonStats(new PlayerSeasonStats(playerUUID, seasonId, jobId, rs.getInt("skill_points"), rs.getInt("class")));
                     } // If no row, seasonStats remains null (or default if constructor sets one)
                 }
 
@@ -383,6 +384,7 @@ public class DatabaseHandler implements AutoCloseable {
                                 pstmt.setNull(3, Types.INTEGER);
                             }
                             pstmt.setInt(4, stats.getSkillPoints());
+                            pstmt.setInt(5, stats.getClassValue());
                             pstmt.executeUpdate();
                         }
                     } else {

@@ -139,6 +139,40 @@ public class Storage {
     }
 
     /**
+     * Sets player's class value for current season.
+     */
+    public CompletableFuture<Boolean> setClassValue(UUID playerUUID, int classValue, String reason) {
+
+        if (isPlayerLoading(playerUUID)) { logger.warn("Attempted to set class value for player {} while loading.", playerUUID); return CompletableFuture.completedFuture(false); }
+        if (!databaseHandler.isDataActive(playerUUID)) { logger.warn("Cannot set class value for player {} - data status is not ACTIVE", playerUUID); return CompletableFuture.completedFuture(false); }
+
+        PlayerSeasonData data = getCachedDataForModification(playerUUID);
+        if (data == null) return CompletableFuture.completedFuture(false);
+
+        PlayerSeasonStats currentStats = data.getSeasonStats().orElse(new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0, 1));
+        int oldClassValue = currentStats.getClassValue();
+
+        if (oldClassValue == classValue) {
+            logger.debug("Player {} class value is already {}. No change needed.", playerUUID, classValue);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        PlayerSeasonStats newStats = new PlayerSeasonStats(
+                playerUUID,
+                data.getSeasonId(),
+                currentStats.getChosenJobId().orElse(null),
+                currentStats.getSkillPoints(),
+                classValue
+        );
+        data.setSeasonStats(newStats);
+
+
+        logger.logTransaction(playerUUID, "ClassValueChange", "PlayerClass", oldClassValue, classValue, reason);
+
+        return CompletableFuture.completedFuture(true);
+    }
+
+    /**
      * Increases the player's experience for a specific content type asynchronously.
      * Checks prerequisites, updates cache, calculates level, logs transaction, and calls events on the main thread.
      * @param playerUUID The player's UUID.
@@ -204,8 +238,8 @@ public class Storage {
         if (oldJobIdOpt.isPresent() && oldJobIdOpt.get() == jobId) { logger.info("Player {} tried to select current job {} again.", playerUUID, jobId); return CompletableFuture.completedFuture(false); }
         Job oldJob = oldJobIdOpt.flatMap(staticDataManager::getJob).orElse(null);
 
-        PlayerSeasonStats currentStats = data.getSeasonStats().orElse(new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0));
-        PlayerSeasonStats newStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), jobId, currentStats.getSkillPoints());
+        PlayerSeasonStats currentStats = data.getSeasonStats().orElse(new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0, 1));
+        PlayerSeasonStats newStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), jobId, currentStats.getSkillPoints(), currentStats.getClassValue());
         data.setSeasonStats(newStats); // Updates cache and marks dirty
 
         logger.logTransaction(playerUUID, "JobSelect", "PlayerJob", oldJobIdOpt.map(Object::toString).orElse("None"), jobId, reason);
@@ -248,7 +282,7 @@ public class Storage {
         // Apply changes to cache
         PlayerSeasonStats currentStats = data.getSeasonStats().orElseThrow(() -> new IllegalStateException("Stats missing during skill level up for " + playerUUID));
         int newSkillPoints = currentSkillPoints - cost;
-        PlayerSeasonStats updatedStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), chosenJobIdOpt.get(), newSkillPoints);
+        PlayerSeasonStats updatedStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), chosenJobIdOpt.get(), newSkillPoints, currentStats.getClassValue());
         data.setSeasonStats(updatedStats);
 
         int newLevel = currentLevel + 1;
@@ -284,10 +318,10 @@ public class Storage {
         PlayerSeasonData data = getCachedDataForModification(playerUUID);
         if (data == null) return CompletableFuture.completedFuture(false);
 
-        PlayerSeasonStats currentStats = data.getSeasonStats().orElse(new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0));
+        PlayerSeasonStats currentStats = data.getSeasonStats().orElse(new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0, 1));
         int oldPoints = currentStats.getSkillPoints();
         int newPoints = oldPoints + amount;
-        PlayerSeasonStats updatedStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), currentStats.getChosenJobId().orElse(null), newPoints);
+        PlayerSeasonStats updatedStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), currentStats.getChosenJobId().orElse(null), newPoints, currentStats.getClassValue());
         data.setSeasonStats(updatedStats); // Updates cache and marks dirty
 
         logger.logTransaction(playerUUID, "SkillPoint", "Gain", oldPoints, newPoints, reason);
@@ -350,16 +384,17 @@ public class Storage {
 
         Optional<Integer> oldJobIdOpt = data.getChosenJobId();
         int oldSkillPoints = data.getSkillPoints();
+        int oldClassValue = data.getSeasonStats().map(PlayerSeasonStats::getClassValue).orElse(1);
         boolean hadSkills = !data.getSkillLevelMap().isEmpty();
         Job oldJob = oldJobIdOpt.flatMap(staticDataManager::getJob).orElse(null); // For event
 
-        if (oldJobIdOpt.isEmpty() && oldSkillPoints == 0 && !hadSkills) {
+        if (oldJobIdOpt.isEmpty() && oldSkillPoints == 0 && oldClassValue == 1 && !hadSkills) {
             logger.info("Player {} has no job data to reset.", playerUUID);
             return CompletableFuture.completedFuture(true); // Nothing to do
         }
 
         // Update cache: Reset stats
-        PlayerSeasonStats resetStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0);
+        PlayerSeasonStats resetStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0, 1);
         data.setSeasonStats(resetStats);
         // Update cache: Mark skills for deletion by setting level to 0
         if (hadSkills) {
@@ -377,6 +412,7 @@ public class Storage {
                 // Log changes and call event
                 logger.logTransaction(playerUUID, "JobReset", "PlayerJob", oldJobIdOpt.map(Object::toString).orElse("None"), "None", reason);
                 if (oldSkillPoints > 0) { logger.logTransaction(playerUUID, "SkillPoint", "Reset", oldSkillPoints, 0, reason); }
+                if (oldClassValue != 1) { logger.logTransaction(playerUUID, "ClassValueChange", "Reset", oldClassValue, 1, reason); }
                 if (hadSkills) { logger.logTransaction(playerUUID, "SkillLevel", "All", "Existing", "Cleared", reason); }
                 Player onlinePlayer = Bukkit.getPlayer(playerUUID);
                 if (onlinePlayer != null && onlinePlayer.isOnline()) {

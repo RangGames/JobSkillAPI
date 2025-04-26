@@ -119,6 +119,18 @@ public class JobSkillAPI {
     }
 
     /**
+     * Gets the Job class for the player in the current season.
+     * @param playerUUID The player's UUID.
+     * @return Default value is 1
+     */
+    public int getClassValue(UUID playerUUID) {
+        return storage.getLoadedPlayerData(playerUUID)
+                .flatMap(PlayerSeasonData::getSeasonStats)
+                .map(PlayerSeasonStats::getClassValue)
+                .orElse(1);
+    }
+
+    /**
      * Gets the player's current skill points for the current season.
      * Returns 0 if data is not loaded.
      * @param playerUUID The player's UUID.
@@ -222,6 +234,21 @@ public class JobSkillAPI {
         if (amount <= 0) return CompletableFuture.completedFuture(false);
         return storage.addContentExperience(playerUUID, contentId, amount, reason);
     }
+
+    /**
+     * Sets the Job class for the player in the current season.
+     * @param playerUUID The player's UUID.
+     * @param classValue The job's class.
+     * @param reason A description of why the class was changed.
+     */
+    public CompletableFuture<Boolean> setClassValue(UUID playerUUID, int classValue, String reason) {
+        if (classValue < 0) {
+            logger.error("Attempted to set invalid class value {} for player {}", classValue, playerUUID);
+            return CompletableFuture.completedFuture(false);
+        }
+        return storage.setClassValue(playerUUID, classValue, reason);
+    }
+
 
     /**
      * Sets the player's chosen job for the current season asynchronously.
