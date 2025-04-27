@@ -9,6 +9,8 @@ import games.rang.jobSkillAPI.storage.Storage;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -356,6 +358,57 @@ public class JobSkillAPI {
         logger.debug("API: Fetching player overall rank for {} in season {}", playerUUID, currentSeasonId);
         return storage.getDatabaseHandler().getPlayerRankOverall(currentSeasonId, playerUUID)
                 .exceptionally(e -> { logger.error("API: Exception occurred fetching player overall rank", e); return -1; });
+    }
+
+    /**
+     * Calculates the player's progress percentage toward the next level for a specific content type.
+     *
+     * @param playerUUID The UUID of the player.
+     * @param contentId The ID of the content type.
+     * @return The progress percentage (0.00 to 100.00).
+     *         Returns 100.00 if the player is at the maximum level for which requirements are defined,
+     *         or -1.00 if data is unavailable or an error occurs.
+     */
+    public double getContentProgressPercentage(UUID playerUUID, int contentId) {
+        Optional<PlayerSeasonData> dataOpt = storage.getLoadedPlayerData(playerUUID);
+        if (dataOpt.isEmpty()) {
+            logger.debug("API: Cannot calculate percentage for {}: Player data not loaded.", playerUUID);
+            return -1.00;
+        }
+        PlayerSeasonData data = dataOpt.get();
+        int currentLevel = data.getContentLevel(contentId);
+        long currentTotalExperience = data.getContentExperience(contentId);
+
+        long experienceForCurrentLevelStart = getTotalExperienceRequired(contentId, currentLevel);
+        if (experienceForCurrentLevelStart == -1 && currentLevel != 1) {
+            logger.warn("API: Could not find total exp requirement for current level {} (contentId {}) for percentage calculation.", currentLevel, contentId);
+            return -1.00;
+        }
+        if (currentLevel == 1) {
+            experienceForCurrentLevelStart = 0;
+        }
+
+        long experienceNeededForNext = getExperienceForNextLevel(contentId, currentLevel);
+
+        if (experienceNeededForNext <= 0) {
+            if (experienceNeededForNext == -1) {
+                logger.debug("API: Player {} at max level or next level requirement not found for content {}. Returning 100%.", playerUUID, contentId);
+                return 100.00;
+            } else {
+                logger.warn("API: Invalid experience requirement ({}) for next level found for content {}. Returning error.", experienceNeededForNext, contentId);
+                return -1.00;
+            }
+        }
+
+        long experienceGainedInLevel = currentTotalExperience - experienceForCurrentLevelStart;
+        experienceGainedInLevel = Math.max(0, experienceGainedInLevel);
+
+        double rawPercentage = (double) experienceGainedInLevel / experienceNeededForNext * 100.0;
+        rawPercentage = Math.max(0.0, Math.min(100.0, rawPercentage));
+
+        BigDecimal bd = new BigDecimal(rawPercentage);
+        bd = bd.setScale(2, RoundingMode.HALF_UP);
+        return bd.doubleValue();
     }
 
     /**
