@@ -276,6 +276,40 @@ public class JobSkillAPI {
         return storage.setClassValue(playerUUID, classValue, reason);
     }
 
+    /**
+     * Asynchronously retrieves the current season ranking (top N players) for a specific content
+     * and returns a list of player UUIDs.
+     * Rankings are sorted by level and experience in descending order.
+     *
+     * @param contentId The ID of the content to query the rankings for.
+     * @param limit The maximum number of players to retrieve (e.g., 100 for top 100 players).
+     * @return A CompletableFuture containing a list of player UUID objects. Returns an empty list in case of a database error.
+     */
+    public CompletableFuture<List<UUID>> getContentRanking(int contentId, int limit) {
+        if (limit <= 0) return CompletableFuture.completedFuture(Collections.emptyList());
+
+        String currentSeasonId = storage.getCurrentSeasonId();
+        logger.info("Fetching top {} content ranking for contentId {} in season {}", limit, contentId, currentSeasonId);
+
+        return storage.getDatabaseHandler().getContentRankingUUIDs(currentSeasonId, contentId, limit)
+                .thenApply(uuidStrings -> {
+                    return uuidStrings.stream()
+                            .map(uuidStr -> {
+                                try {
+                                    return UUID.fromString(uuidStr);
+                                } catch (IllegalArgumentException e) {
+                                    logger.error("Invalid UUID format found in ranking data: {}", uuidStr);
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+                })
+                .exceptionally(e -> {
+                    logger.error("Exception occurred while fetching content ranking for contentId {}: {}", contentId, e.getMessage(), e);
+                    return Collections.emptyList();
+                });
+    }
 
     /**
      * Sets the player's chosen job for the current season asynchronously.

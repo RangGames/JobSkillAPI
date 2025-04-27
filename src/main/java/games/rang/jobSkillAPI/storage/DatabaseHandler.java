@@ -10,7 +10,6 @@ import java.sql.*;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.stream.Collectors;
 
 /**
  * Handles database interactions, connection pooling using HikariCP, and executing SQL queries
@@ -113,6 +112,13 @@ public class DatabaseHandler implements AutoCloseable {
     private static final String LOAD_PLAYER_SEASON_STATS = "SELECT chosen_job_id, skill_points, class FROM Player_Season_Stats WHERE player_uuid = ? AND season_id = ?";
     private static final String LOAD_PLAYER_CONTENT_PROGRESS = "SELECT content_id, experience, level FROM Player_Content_Progress WHERE player_uuid = ? AND season_id = ?";
     private static final String LOAD_PLAYER_SKILL_LEVELS = "SELECT skill_id, level FROM Player_Skill_Levels WHERE player_uuid = ? AND season_id = ?";
+    private static final String GET_CONTENT_RANKING_UUIDS = """
+        SELECT player_uuid
+        FROM Player_Content_Progress
+        WHERE season_id = ? AND content_id = ?
+        ORDER BY level DESC, experience DESC
+        LIMIT ?
+        """;
 
     // --- Player Data Saving Queries (UPSERT/DELETE) ---
     private static final String UPSERT_PLAYER_SEASON_STATS = """
@@ -490,6 +496,40 @@ public class DatabaseHandler implements AutoCloseable {
             return true;
         }
         return true; // Status already existed
+    }
+
+    /**
+     * Asynchronously retrieves a list of UUIDs for the top-ranked players in a specific season and content.
+     * Rankings are sorted by level (descending) and then by experience (descending).
+     *
+     * @param seasonId The ID of the season to query.
+     * @param contentId The ID of the content to query.
+     * @param limit The maximum number of rankings to retrieve (e.g., 100 for top 100 players).
+     * @return A CompletableFuture containing a list of UUID strings. Returns an empty list in case of a database error.
+     */
+    public CompletableFuture<List<String>> getContentRankingUUIDs(String seasonId, int contentId, int limit) {
+        return CompletableFuture.supplyAsync(() -> {
+            List<String> rankedUUIDs = new ArrayList<>();
+            if (limit <= 0) return rankedUUIDs;
+
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(GET_CONTENT_RANKING_UUIDS)) {
+
+                pstmt.setString(1, seasonId);
+                pstmt.setInt(2, contentId);
+                pstmt.setInt(3, limit);
+
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        rankedUUIDs.add(rs.getString("player_uuid"));
+                    }
+                }
+                logger.debug("Fetched top {} UUIDs for content {} ranking in season {}", rankedUUIDs.size(), contentId, seasonId);
+            } catch (SQLException e) {
+                logger.error("Failed to fetch content ranking for contentId {} season {}: {}", contentId, seasonId, e.getMessage(), e);
+            }
+            return rankedUUIDs;
+        });
     }
 
     /**
