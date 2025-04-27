@@ -12,7 +12,9 @@ import org.bukkit.entity.Player;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
 
 /**
@@ -359,6 +361,34 @@ public class JobSkillAPI {
     }
 
     /**
+     * Asynchronously fetches the content experience for a specific player and content type.
+     * This method first checks the in-memory cache if the player is online and their data is loaded.
+     * If the data is not found in the cache, it queries the database for the specified content ID and the current season.
+     * Returns the default experience (0) if the player has no record or if a database error occurs.
+     *
+     * @param playerUUID The UUID of the player to query.
+     * @param contentId The ID of the content type.
+     * @return A {@link CompletableFuture} containing the player's experience (long).
+     *         Returns 0 if no data is found or if a database error occurs.
+     */
+    public CompletableFuture<Long> getPlayerContentExperiencePossiblyOffline(UUID playerUUID, int contentId) {
+        Optional<PlayerSeasonData> cachedDataOpt = storage.getLoadedPlayerData(playerUUID);
+        if (cachedDataOpt.isPresent()) {
+            long cachedExperience = cachedDataOpt.get().getContentExperience(contentId);
+            return CompletableFuture.completedFuture(cachedExperience);
+        }
+
+        String currentSeasonId = storage.getCurrentSeasonId();
+        logger.debug("API: Cache miss for player {} content {} experience. Querying DB for season {}...", playerUUID, contentId, currentSeasonId);
+        return storage.getDatabaseHandler().getSpecificContentExperienceFromDB(playerUUID, contentId, currentSeasonId)
+                .thenApply(optionalExperience -> optionalExperience.orElse(0L))
+                .exceptionally(e -> {
+                    logger.error("API: Exception occurred fetching offline content experience for player {}: {}", playerUUID, e.getMessage(), e);
+                    return 0L;
+                });
+    }
+
+    /**
      * Asynchronously retrieves the rank of a specific player within a specific content
      * for the current season.
      *
@@ -388,56 +418,100 @@ public class JobSkillAPI {
         return storage.getDatabaseHandler().getPlayerRankOverall(currentSeasonId, playerUUID)
                 .exceptionally(e -> { logger.error("API: Exception occurred fetching player overall rank", e); return -1; });
     }
-
     /**
-     * Calculates the player's progress percentage toward the next level for a specific content type.
+     * [Cache Only] Calculates the player's progress percentage towards the next level using cached data only.
+     * Use {@link #getContentProgressPercentagePossiblyOffline(UUID, int)} for potentially offline players.
      *
      * @param playerUUID The UUID of the player.
      * @param contentId The ID of the content type.
-     * @return The progress percentage (0.00 to 100.00).
-     *         Returns 100.00 if the player is at the maximum level for which requirements are defined,
-     *         or -1.00 if data is unavailable or an error occurs.
+     * @return The progress percentage (0.00 to 100.00, rounded to 2 decimal places). Returns 100.00 if at max level, -1.00 on error or if data is not loaded.
      */
     public double getContentProgressPercentage(UUID playerUUID, int contentId) {
         Optional<PlayerSeasonData> dataOpt = storage.getLoadedPlayerData(playerUUID);
         if (dataOpt.isEmpty()) {
-            logger.debug("API: Cannot calculate percentage for {}: Player data not loaded.", playerUUID);
+            logger.debug("API (Cache): Cannot calculate percentage for {}: Player data not loaded.", playerUUID);
             return -1.00;
         }
         PlayerSeasonData data = dataOpt.get();
         int currentLevel = data.getContentLevel(contentId);
         long currentTotalExperience = data.getContentExperience(contentId);
 
+        return calculatePercentageInternal(playerUUID, contentId, currentLevel, currentTotalExperience);
+    }
+
+    /**
+     * Asynchronously calculates the player's progress percentage towards the next level,
+     * fetching data from cache or the database if necessary.
+     *
+     * @param playerUUID The UUID of the player.
+     * @param contentId The ID of the content type.
+     * @return A {@link CompletableFuture} containing the progress percentage (0.00 to 100.00, rounded to 2 decimal places).
+     *         Returns 100.00 if at max level, or -1.00 if an error occurs.
+     */
+    public CompletableFuture<Double> getContentProgressPercentagePossiblyOffline(UUID playerUUID, int contentId) {
+        CompletableFuture<Integer> levelFuture = getPlayerContentLevelPossiblyOffline(playerUUID, contentId);
+        CompletableFuture<Long> experienceFuture = getPlayerContentExperiencePossiblyOffline(playerUUID, contentId);
+
+        return CompletableFuture.allOf(levelFuture, experienceFuture)
+                .thenApply(v -> {
+                    try {
+                        int currentLevel = levelFuture.join();
+                        long currentTotalExperience = experienceFuture.join();
+
+                        return calculatePercentageInternal(playerUUID, contentId, currentLevel, currentTotalExperience);
+                    } catch (CompletionException | CancellationException e) {
+                        logger.error("API: Error retrieving level/experience for percentage calculation (Player: {}, Content: {}): {}", playerUUID, contentId, e.getMessage());
+                        return -1.0;
+                    }
+                })
+                .exceptionally(e -> {
+                    logger.error("API: Unexpected error calculating offline percentage for player {}: {}", playerUUID, e.getMessage(), e);
+                    return -1.0;
+                });
+    }
+
+    /**
+     * Internal calculation logic: calculates the progress percentage based on level and experience.
+     *
+     * @param playerUUID The UUID of the player.
+     * @param contentId The ID of the content type.
+     * @param currentLevel The player's current level.
+     * @param currentTotalExperience The player's current total experience.
+     * @return The progress percentage (rounded to 2 decimal places).
+     */
+    private double calculatePercentageInternal(UUID playerUUID, int contentId, int currentLevel, long currentTotalExperience) {
         long experienceForCurrentLevelStart = getTotalExperienceRequired(contentId, currentLevel);
         if (experienceForCurrentLevelStart == -1 && currentLevel != 1) {
-            logger.warn("API: Could not find total exp requirement for current level {} (contentId {}) for percentage calculation.", currentLevel, contentId);
+            logger.warn("API Internal: Could not find total exp requirement for current level {} (contentId {}) for player {}. Cannot calculate percentage.", currentLevel, contentId, playerUUID);
             return -1.00;
         }
-        if (currentLevel == 1) {
-            experienceForCurrentLevelStart = 0;
-        }
+        if (currentLevel == 1) experienceForCurrentLevelStart = 0;
 
         long experienceNeededForNext = getExperienceForNextLevel(contentId, currentLevel);
 
         if (experienceNeededForNext <= 0) {
             if (experienceNeededForNext == -1) {
-                logger.debug("API: Player {} at max level or next level requirement not found for content {}. Returning 100%.", playerUUID, contentId);
+                logger.debug("API Internal: Player {} at max level or next requirement not found for content {}. Returning 100%.", playerUUID, contentId);
                 return 100.00;
             } else {
-                logger.warn("API: Invalid experience requirement ({}) for next level found for content {}. Returning error.", experienceNeededForNext, contentId);
+                logger.warn("API Internal: Invalid experience requirement ({}) for next level found for content {}. Returning error.", experienceNeededForNext, contentId);
                 return -1.00;
             }
         }
 
-        long experienceGainedInLevel = currentTotalExperience - experienceForCurrentLevelStart;
-        experienceGainedInLevel = Math.max(0, experienceGainedInLevel);
+        long experienceGainedInLevel = Math.max(0, currentTotalExperience - experienceForCurrentLevelStart);
 
         double rawPercentage = (double) experienceGainedInLevel / experienceNeededForNext * 100.0;
         rawPercentage = Math.max(0.0, Math.min(100.0, rawPercentage));
 
-        BigDecimal bd = new BigDecimal(rawPercentage);
-        bd = bd.setScale(2, RoundingMode.HALF_UP);
-        return bd.doubleValue();
+        try {
+            BigDecimal bd = new BigDecimal(rawPercentage);
+            bd = bd.setScale(2, RoundingMode.HALF_UP);
+            return bd.doubleValue();
+        } catch (NumberFormatException e) {
+            logger.error("API Internal: Error formatting percentage {} for player {}", rawPercentage, playerUUID, e);
+            return -1.0;
+        }
     }
 
     /**

@@ -125,7 +125,12 @@ public class DatabaseHandler implements AutoCloseable {
         WHERE player_uuid = ? AND content_id = ? AND season_id = ?
         LIMIT 1
         """;
-
+    private static final String GET_PLAYER_SPECIFIC_CONTENT_EXPERIENCE = """
+        SELECT experience
+        FROM Player_Content_Progress
+        WHERE player_uuid = ? AND content_id = ? AND season_id = ?
+        LIMIT 1
+        """;
     // --- Player Data Saving Queries (UPSERT/DELETE) ---
     private static final String UPSERT_PLAYER_SEASON_STATS = """
         INSERT INTO Player_Season_Stats (player_uuid, season_id, chosen_job_id, skill_points, class)
@@ -552,6 +557,40 @@ public class DatabaseHandler implements AutoCloseable {
                 }
             } catch (SQLException e) {
                 logger.error("Failed to get specific content level from DB for player {}, content {}, season {}: {}",
+                        playerUUID, contentId, seasonId, e.getMessage());
+                return Optional.empty();
+            }
+        });
+    }
+
+    /**
+     * Asynchronously retrieves the experience of a specific player for a specific content and season directly from the database.
+     * Returns Optional.empty() if the data does not exist.
+     *
+     * @param playerUUID The UUID of the player to query.
+     * @param contentId The ID of the content to query.
+     * @param seasonId The ID of the season to query.
+     * @return A CompletableFuture containing an Optional<Long> with the experience value.
+     *         Returns Optional.empty() if no data is found or a database error occurs.
+     */
+    public CompletableFuture<Optional<Long>> getSpecificContentExperienceFromDB(UUID playerUUID, int contentId, String seasonId) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(GET_PLAYER_SPECIFIC_CONTENT_EXPERIENCE)) {
+
+                pstmt.setString(1, playerUUID.toString());
+                pstmt.setInt(2, contentId);
+                pstmt.setString(3, seasonId);
+
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return Optional.of(rs.getLong("experience"));
+                    } else {
+                        return Optional.empty();
+                    }
+                }
+            } catch (SQLException e) {
+                logger.error("Failed to get specific content experience from DB for player {}, content {}, season {}: {}",
                         playerUUID, contentId, seasonId, e.getMessage());
                 return Optional.empty();
             }
