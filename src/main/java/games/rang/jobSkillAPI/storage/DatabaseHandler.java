@@ -194,10 +194,16 @@ public class DatabaseHandler implements AutoCloseable {
         FROM (
             SELECT
                 player_uuid,
-                RANK() OVER (ORDER BY SUM(level) DESC, SUM(experience) DESC) as rank
-            FROM Player_Content_Progress
-            WHERE season_id = ?
-            GROUP BY player_uuid
+                RANK() OVER (ORDER BY total_level DESC, total_experience DESC) as rank
+            FROM (
+                SELECT
+                    player_uuid,
+                    SUM(level) AS total_level,
+                    SUM(experience) AS total_experience
+                FROM Player_Content_Progress
+                WHERE season_id = ?
+                GROUP BY player_uuid
+            ) subquery
         ) ranked
         WHERE player_uuid = ?
         """;
