@@ -312,6 +312,53 @@ public class JobSkillAPI {
     }
 
     /**
+     * Asynchronously retrieves the current season overall ranking (top N players)
+     * based on the total sum of all content levels, and returns a list of player UUIDs.
+     *
+     * @param limit The maximum number of players to retrieve (e.g., 100).
+     * @return A CompletableFuture containing a list of player UUID objects.
+     */
+    public CompletableFuture<List<UUID>> getOverallLevelRanking(int limit) {
+        if (limit <= 0) return CompletableFuture.completedFuture(Collections.emptyList());
+        String currentSeasonId = storage.getCurrentSeasonId();
+        logger.debug("API: Fetching top {} overall level ranking in season {}", limit, currentSeasonId);
+        return storage.getDatabaseHandler().getOverallLevelRankingUUIDs(currentSeasonId, limit)
+                .thenApply(uuidStrings -> uuidStrings.stream().map(this::safeUUIDFromString).filter(Objects::nonNull).collect(Collectors.toList()))
+                .exceptionally(e -> { logger.error("API: Exception occurred fetching overall level ranking", e); return Collections.emptyList(); });
+    }
+
+    /**
+     * Asynchronously retrieves the rank of a specific player within a specific content
+     * for the current season.
+     *
+     * @param playerUUID The UUID of the player to query.
+     * @param contentId The ID of the content to query.
+     * @return A CompletableFuture containing the player's rank (1 or higher),
+     *         or -1 if the player is not ranked or an error occurs.
+     */
+    public CompletableFuture<Integer> getPlayerContentRank(UUID playerUUID, int contentId) {
+        String currentSeasonId = storage.getCurrentSeasonId();
+        logger.debug("API: Fetching player rank for {} in content {} season {}", playerUUID, contentId, currentSeasonId);
+        return storage.getDatabaseHandler().getPlayerRankInContent(currentSeasonId, contentId, playerUUID)
+                .exceptionally(e -> { logger.error("API: Exception occurred fetching player content rank", e); return -1; });
+    }
+
+    /**
+     * Asynchronously retrieves the overall rank of a specific player
+     * based on the total sum of all content levels for the current season.
+     *
+     * @param playerUUID The UUID of the player to query.
+     * @return A CompletableFuture containing the player's overall rank (1 or higher),
+     *         or -1 if the player is not ranked or an error occurs.
+     */
+    public CompletableFuture<Integer> getPlayerOverallRank(UUID playerUUID) {
+        String currentSeasonId = storage.getCurrentSeasonId();
+        logger.debug("API: Fetching player overall rank for {} in season {}", playerUUID, currentSeasonId);
+        return storage.getDatabaseHandler().getPlayerRankOverall(currentSeasonId, playerUUID)
+                .exceptionally(e -> { logger.error("API: Exception occurred fetching player overall rank", e); return -1; });
+    }
+
+    /**
      * Sets the player's chosen job for the current season asynchronously.
      * Checks requirements and triggers relevant events.
      * @param playerUUID The player's UUID.
@@ -667,4 +714,14 @@ public class JobSkillAPI {
     public boolean isPlayerDataLoading(UUID playerUUID) { return storage.isPlayerLoading(playerUUID); }
     /** Gets the internal Storage object. Use with caution, mainly for internal plugin access. */
     public Storage getStorage() { return storage; }
+    /** Helper to safely convert String to UUID, returning null on error. */
+    private UUID safeUUIDFromString(String uuidStr) {
+        if (uuidStr == null) return null;
+        try {
+            return UUID.fromString(uuidStr);
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid UUID format encountered: {}", uuidStr);
+            return null;
+        }
+    }
 }

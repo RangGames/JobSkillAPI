@@ -165,6 +165,44 @@ public class DatabaseHandler implements AutoCloseable {
     private static final String LOAD_JOBS = "SELECT * FROM Jobs";
     private static final String LOAD_SKILLS = "SELECT * FROM Skills";
 
+    // --- Ranking ---
+    private static final String GET_OVERALL_LEVEL_RANKING_UUIDS = """
+        SELECT player_uuid
+        FROM Player_Content_Progress
+        WHERE season_id = ?
+        GROUP BY player_uuid
+        ORDER BY SUM(level) DESC, SUM(experience) DESC 
+        LIMIT ?
+        """;
+
+    // RANK()는 동점자를 같은 순위로 처리하고 다음 순위를 건너뜁니다. (1, 1, 3)
+    // DENSE_RANK()는 동점자를 같은 순위로 처리하고 다음 순위를 건너뛰지 않습니다. (1, 1, 2)
+    // ROW_NUMBER()는 동점자 발생 시 임의 순서로 고유 순위를 부여합니다. (1, 2, 3)
+    private static final String GET_PLAYER_RANK_IN_CONTENT = """
+        SELECT rank
+        FROM (
+            SELECT
+                player_uuid,
+                RANK() OVER (ORDER BY level DESC, experience DESC) as rank
+            FROM Player_Content_Progress
+            WHERE season_id = ? AND content_id = ?
+        ) ranked
+        WHERE player_uuid = ?
+        """;
+    private static final String GET_PLAYER_RANK_OVERALL = """
+        SELECT rank
+        FROM (
+            SELECT
+                player_uuid,
+                RANK() OVER (ORDER BY SUM(level) DESC, SUM(experience) DESC) as rank
+            FROM Player_Content_Progress
+            WHERE season_id = ?
+            GROUP BY player_uuid
+        ) ranked
+        WHERE player_uuid = ?
+        """;
+
+
     /**
      * Constructor for DatabaseHandler. Initializes the HikariCP data source and ensures database tables are created.
      * @param config The configuration manager instance.
@@ -735,6 +773,96 @@ public class DatabaseHandler implements AutoCloseable {
             } catch (SQLException e) {
                 logger.error("Database connection failed during data deletion for {}: {}", playerUUIDStr, e.getMessage(), e);
                 return false; // Connection failed
+            }
+        });
+    }
+
+    /**
+     * Asynchronously retrieves a list of UUIDs for the top-ranked players
+     * based on the overall sum of content levels in a specific season.
+     *
+     * @param seasonId The ID of the season to query.
+     * @param limit The maximum number of players to retrieve.
+     * @return A CompletableFuture containing a list of UUID strings.
+     */
+    public CompletableFuture<List<String>> getOverallLevelRankingUUIDs(String seasonId, int limit) {
+        return CompletableFuture.supplyAsync(() -> {
+            List<String> rankedUUIDs = new ArrayList<>();
+            if (limit <= 0) return rankedUUIDs;
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(GET_OVERALL_LEVEL_RANKING_UUIDS)) {
+                pstmt.setString(1, seasonId);
+                pstmt.setInt(2, limit);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        rankedUUIDs.add(rs.getString("player_uuid"));
+                    }
+                }
+                logger.debug("Fetched top {} UUIDs for overall level ranking in season {}", rankedUUIDs.size(), seasonId);
+            } catch (SQLException e) {
+                logger.error("Failed to fetch overall level ranking for season {}: {}", seasonId, e.getMessage(), e);
+            }
+            return rankedUUIDs;
+        });
+    }
+
+    /**
+     * Asynchronously retrieves the rank of a specific player within a specific content in a specific season.
+     *
+     * @param seasonId The ID of the season to query.
+     * @param contentId The ID of the content to query.
+     * @param playerUUID The UUID of the player to retrieve the rank for.
+     * @return A CompletableFuture containing the player's rank (Integer).
+     *         Returns -1 if no data is found or an error occurs.
+     */
+    public CompletableFuture<Integer> getPlayerRankInContent(String seasonId, int contentId, UUID playerUUID) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(GET_PLAYER_RANK_IN_CONTENT)) {
+                pstmt.setString(1, seasonId);
+                pstmt.setInt(2, contentId);
+                pstmt.setString(3, playerUUID.toString());
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt("rank");
+                    } else {
+                        logger.debug("Player {} not found in ranking for content {} season {}", playerUUID, contentId, seasonId);
+                        return -1;
+                    }
+                }
+            } catch (SQLException e) {
+                logger.error("Failed to get player rank in content {} season {} for {}: {}", contentId, seasonId, playerUUID, e.getMessage(), e);
+                return -1;
+            }
+        });
+    }
+
+    /**
+     * Asynchronously retrieves the overall rank of a specific player
+     * based on the sum of all content levels in a specific season.
+     *
+     * @param seasonId The ID of the season to query.
+     * @param playerUUID The UUID of the player to retrieve the overall rank for.
+     * @return A CompletableFuture containing the player's overall rank (Integer).
+     *         Returns -1 if no data is found or an error occurs.
+     */
+    public CompletableFuture<Integer> getPlayerRankOverall(String seasonId, UUID playerUUID) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(GET_PLAYER_RANK_OVERALL)) {
+                pstmt.setString(1, seasonId);
+                pstmt.setString(2, playerUUID.toString());
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt("rank");
+                    } else {
+                        logger.debug("Player {} not found in overall ranking for season {}", playerUUID, seasonId);
+                        return -1;
+                    }
+                }
+            } catch (SQLException e) {
+                logger.error("Failed to get player overall rank for season {} for {}: {}", seasonId, playerUUID, e.getMessage(), e);
+                return -1;
             }
         });
     }
