@@ -119,6 +119,12 @@ public class DatabaseHandler implements AutoCloseable {
         ORDER BY level DESC, experience DESC
         LIMIT ?
         """;
+    private static final String GET_PLAYER_SPECIFIC_CONTENT_LEVEL = """
+        SELECT level
+        FROM Player_Content_Progress
+        WHERE player_uuid = ? AND content_id = ? AND season_id = ?
+        LIMIT 1
+        """;
 
     // --- Player Data Saving Queries (UPSERT/DELETE) ---
     private static final String UPSERT_PLAYER_SEASON_STATS = """
@@ -179,22 +185,23 @@ public class DatabaseHandler implements AutoCloseable {
     // DENSE_RANK()는 동점자를 같은 순위로 처리하고 다음 순위를 건너뛰지 않습니다. (1, 1, 2)
     // ROW_NUMBER()는 동점자 발생 시 임의 순서로 고유 순위를 부여합니다. (1, 2, 3)
     private static final String GET_PLAYER_RANK_IN_CONTENT = """
-        SELECT rank
+        SELECT ranked.`rank`
         FROM (
             SELECT
                 player_uuid,
-                RANK() OVER (ORDER BY level DESC, experience DESC) as rank
+                RANK() OVER (ORDER BY level DESC, experience DESC) AS `rank`
             FROM Player_Content_Progress
             WHERE season_id = ? AND content_id = ?
-        ) ranked
-        WHERE player_uuid = ?
+        ) AS ranked
+        WHERE ranked.player_uuid = ?
         """;
+
     private static final String GET_PLAYER_RANK_OVERALL = """
-        SELECT rank
+        SELECT ranked.`rank`
         FROM (
             SELECT
                 player_uuid,
-                RANK() OVER (ORDER BY total_level DESC, total_experience DESC) as rank
+                RANK() OVER (ORDER BY total_level DESC, total_experience DESC) AS `rank`
             FROM (
                 SELECT
                     player_uuid,
@@ -203,10 +210,11 @@ public class DatabaseHandler implements AutoCloseable {
                 FROM Player_Content_Progress
                 WHERE season_id = ?
                 GROUP BY player_uuid
-            ) subquery
-        ) ranked
-        WHERE player_uuid = ?
+            ) AS summed
+        ) AS ranked
+        WHERE ranked.player_uuid = ?
         """;
+
 
 
     /**
@@ -514,6 +522,40 @@ public class DatabaseHandler implements AutoCloseable {
             ResultSet rs = stmt.executeQuery();
             return rs.next() ? Optional.ofNullable(rs.getString("data_status")) : Optional.empty();
         }
+    }
+
+    /**
+     * Asynchronously retrieves the level of a specific player for a specific content and season directly from the database.
+     * Returns Optional.empty() if the data does not exist.
+     *
+     * @param playerUUID The UUID of the player to query.
+     * @param contentId The ID of the content to query.
+     * @param seasonId The ID of the season to query.
+     * @return A CompletableFuture containing an Optional<Integer> with the level value.
+     *         Returns Optional.empty() if no data is found or a database error occurs.
+     */
+    public CompletableFuture<Optional<Integer>> getSpecificContentLevelFromDB(UUID playerUUID, int contentId, String seasonId) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement pstmt = conn.prepareStatement(GET_PLAYER_SPECIFIC_CONTENT_LEVEL)) {
+
+                pstmt.setString(1, playerUUID.toString());
+                pstmt.setInt(2, contentId);
+                pstmt.setString(3, seasonId);
+
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return Optional.of(rs.getInt("level"));
+                    } else {
+                        return Optional.empty();
+                    }
+                }
+            } catch (SQLException e) {
+                logger.error("Failed to get specific content level from DB for player {}, content {}, season {}: {}",
+                        playerUUID, contentId, seasonId, e.getMessage());
+                return Optional.empty();
+            }
+        });
     }
 
     /**

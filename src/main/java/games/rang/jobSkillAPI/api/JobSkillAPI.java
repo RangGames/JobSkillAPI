@@ -330,6 +330,35 @@ public class JobSkillAPI {
     }
 
     /**
+     * Asynchronously retrieves the player's level for a specific content type.
+     * If the player is online and cached, returns the cached value immediately.
+     * If the player is offline or not cached, queries the database.
+     * Returns the default level (1) if the data does not exist in the database.
+     *
+     * @param playerUUID The UUID of the player to query.
+     * @param contentId The ID of the content type to query.
+     * @return A CompletableFuture containing the level value as Integer. Returns 1 if a database error occurs or data is missing.
+     */
+    public CompletableFuture<Integer> getPlayerContentLevelPossiblyOffline(UUID playerUUID, int contentId) {
+        Optional<PlayerSeasonData> cachedDataOpt = storage.getLoadedPlayerData(playerUUID);
+        if (cachedDataOpt.isPresent()) {
+            int cachedLevel = cachedDataOpt.get().getContentLevel(contentId);
+            return CompletableFuture.completedFuture(cachedLevel);
+        }
+
+        String currentSeasonId = storage.getCurrentSeasonId();
+        logger.debug("API: Cache miss for player {} content {}. Querying DB for season {}...", playerUUID, contentId, currentSeasonId);
+        return storage.getDatabaseHandler().getSpecificContentLevelFromDB(playerUUID, contentId, currentSeasonId)
+                .thenApply(optionalLevel -> {
+                    return optionalLevel.orElse(1);
+                })
+                .exceptionally(e -> {
+                    logger.error("API: Exception occurred fetching offline content level for player {}: {}", playerUUID, e.getMessage(), e);
+                    return 1;
+                });
+    }
+
+    /**
      * Asynchronously retrieves the rank of a specific player within a specific content
      * for the current season.
      *
