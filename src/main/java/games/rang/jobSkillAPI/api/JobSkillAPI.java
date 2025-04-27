@@ -6,7 +6,6 @@ import games.rang.jobSkillAPI.log.TransactionLogger;
 import games.rang.jobSkillAPI.model.*;
 import games.rang.jobSkillAPI.redis.RedisManager;
 import games.rang.jobSkillAPI.storage.Storage;
-
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
@@ -236,6 +235,34 @@ public class JobSkillAPI {
     }
 
     /**
+     * Decreases the player's experience for a specific content asynchronously.
+     * Level down may occur automatically.
+     * @param playerUUID The UUID of the target player.
+     * @param contentId The content ID.
+     * @param amount The amount of experience to decrease (must be positive).
+     * @param reason The reason for the change (for logging/events).
+     * @return A CompletableFuture containing true if the experience was successfully decreased, false otherwise.
+     */
+    public CompletableFuture<Boolean> removeContentExperience(UUID playerUUID, int contentId, long amount, String reason) {
+        if (amount <= 0) { logger.warn("API: Amount must be positive for removeContentExperience."); return CompletableFuture.completedFuture(false); }
+        return storage.removeContentExperience(playerUUID, contentId, amount, reason);
+    }
+
+    /**
+     * Sets the player's experience for a specific content to a given value asynchronously.
+     * The level is automatically recalculated.
+     * @param playerUUID The UUID of the target player.
+     * @param contentId The content ID.
+     * @param amount The experience amount to set (must be zero or positive).
+     * @param reason The reason for the change (for logging/events).
+     * @return A CompletableFuture containing true if the operation was successful, false otherwise.
+     */
+    public CompletableFuture<Boolean> setContentExperience(UUID playerUUID, int contentId, long amount, String reason) {
+        if (amount < 0) { logger.warn("API: Amount cannot be negative for setContentExperience."); return CompletableFuture.completedFuture(false); }
+        return storage.setContentExperience(playerUUID, contentId, amount, reason);
+    }
+
+    /**
      * Sets the Job class for the player in the current season.
      * @param playerUUID The player's UUID.
      * @param classValue The job's class.
@@ -290,6 +317,30 @@ public class JobSkillAPI {
     public CompletableFuture<Boolean> addSkillPoints(UUID playerUUID, int amount, String reason) {
         if (amount <= 0) return CompletableFuture.completedFuture(false);
         return storage.addSkillPoints(playerUUID, amount, reason);
+    }
+
+    /**
+     * Deducts skill points from the player's current total asynchronously.
+     * @param playerUUID The UUID of the target player.
+     * @param amount The number of skill points to deduct (must be positive).
+     * @param reason The reason for the change (for logging/events).
+     * @return A CompletableFuture containing true if the deduction was successful, false otherwise.
+     */
+    public CompletableFuture<Boolean> removeSkillPoints(UUID playerUUID, int amount, String reason) {
+        if (amount <= 0) { logger.warn("API: Amount must be positive for removeSkillPoints."); return CompletableFuture.completedFuture(false); }
+        return storage.removeSkillPoints(playerUUID, amount, reason);
+    }
+
+    /**
+     * Sets the player's skill points to a specific value asynchronously.
+     * @param playerUUID The UUID of the target player.
+     * @param amount The skill points to set (must be zero or positive).
+     * @param reason The reason for the change (for logging/events).
+     * @return A CompletableFuture containing true if the operation was successful, false otherwise.
+     */
+    public CompletableFuture<Boolean> setSkillPoints(UUID playerUUID, int amount, String reason) {
+        if (amount < 0) { logger.warn("API: Amount cannot be negative for setSkillPoints."); return CompletableFuture.completedFuture(false); }
+        return storage.setSkillPoints(playerUUID, amount, reason);
     }
 
     /**

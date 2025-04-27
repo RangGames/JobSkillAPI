@@ -6,7 +6,6 @@ import games.rang.jobSkillAPI.data.StaticDataManager;
 import games.rang.jobSkillAPI.event.*;
 import games.rang.jobSkillAPI.log.TransactionLogger;
 import games.rang.jobSkillAPI.model.*;
-
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
@@ -216,6 +215,104 @@ public class Storage {
     }
 
     /**
+     * Decreases the player's experience for a specific content.
+     * Fails if the player does not have enough experience. Level down is automatically calculated.
+     * @param playerUUID The player's UUID.
+     * @param contentId The content ID.
+     * @param amount The amount of experience to decrease (must be positive).
+     * @param reason The reason for the change (for logging/events).
+     * @return A CompletableFuture containing true if the operation was successful, false otherwise.
+     */
+    public CompletableFuture<Boolean> removeContentExperience(UUID playerUUID, int contentId, long amount, String reason) {
+        if (amount <= 0) { logger.warn("Attempted to remove non-positive experience: {}", amount); return CompletableFuture.completedFuture(false); }
+        if (isPlayerLoading(playerUUID)) { logger.warn("Attempted removeContentExperience for {} while loading.", playerUUID); return CompletableFuture.completedFuture(false); }
+        if (!databaseHandler.isDataActive(playerUUID)) { logger.warn("Cannot removeContentExperience for {} - data status not ACTIVE.", playerUUID); return CompletableFuture.completedFuture(false); }
+        Optional<ContentType> contentTypeOpt = staticDataManager.getContentType(contentId);
+        if (contentTypeOpt.isEmpty()) { logger.warn("Attempted to remove experience for non-existent contentId: {}", contentId); return CompletableFuture.completedFuture(false); }
+        ContentType contentType = contentTypeOpt.get();
+
+        PlayerSeasonData data = getCachedDataForModification(playerUUID);
+        if (data == null) return CompletableFuture.completedFuture(false);
+
+        PlayerContentProgress currentProgress = data.getProgress(contentId).orElse(new PlayerContentProgress(contentId, data.getSeasonId(), 0L, 1));
+        long oldExp = currentProgress.getExperience();
+        int oldLevel = currentProgress.getLevel();
+
+        if (oldExp < amount) {
+            logger.debug("Player {} does not have enough experience ({}) for content {} to remove {}.", playerUUID, oldExp, contentId, amount);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        long newExp = oldExp - amount;
+        int newLevel = staticDataManager.calculateLevel(contentId, newExp);
+
+        if (newExp != oldExp || newLevel != oldLevel) {
+            PlayerContentProgress updatedProgress = new PlayerContentProgress(contentId, data.getSeasonId(), newExp, newLevel);
+            data.setContentProgress(updatedProgress);
+
+            logger.logTransaction(playerUUID, "ContentExp", contentId, oldExp, newExp, reason);
+            if (newLevel < oldLevel) {
+                logger.logTransaction(playerUUID, "ContentLevel", contentId, oldLevel, newLevel, "Level Down via " + reason);
+            }
+            return CompletableFuture.completedFuture(true);
+        }
+        return CompletableFuture.completedFuture(false);
+    }
+
+    /**
+     * Sets the player's experience for a specific content to a given value.
+     * The level is also recalculated according to the new experience.
+     * @param playerUUID The player's UUID.
+     * @param contentId The content ID.
+     * @param amount The experience amount to set (must be zero or positive).
+     * @param reason The reason for the change (for logging/events).
+     * @return A CompletableFuture containing true if the operation was successful, false otherwise.
+     */
+    public CompletableFuture<Boolean> setContentExperience(UUID playerUUID, int contentId, long amount, String reason) {
+        if (amount < 0) { logger.warn("Attempted to set negative experience: {}", amount); return CompletableFuture.completedFuture(false); }
+        if (isPlayerLoading(playerUUID)) { logger.warn("Attempted setContentExperience for {} while loading.", playerUUID); return CompletableFuture.completedFuture(false); }
+        if (!databaseHandler.isDataActive(playerUUID)) { logger.warn("Cannot setContentExperience for {} - data status not ACTIVE.", playerUUID); return CompletableFuture.completedFuture(false); }
+        Optional<ContentType> contentTypeOpt = staticDataManager.getContentType(contentId);
+        if (contentTypeOpt.isEmpty()) { logger.warn("Attempted to set experience for non-existent contentId: {}", contentId); return CompletableFuture.completedFuture(false); }
+        ContentType contentType = contentTypeOpt.get();
+
+        PlayerSeasonData data = getCachedDataForModification(playerUUID);
+        if (data == null) return CompletableFuture.completedFuture(false);
+
+        PlayerContentProgress currentProgress = data.getProgress(contentId).orElse(new PlayerContentProgress(contentId, data.getSeasonId(), 0L, 1));
+        long oldExp = currentProgress.getExperience();
+        int oldLevel = currentProgress.getLevel();
+
+        if (oldExp == amount) {
+            logger.debug("Player {} content {} experience already set to {}. No change needed.", playerUUID, contentId, amount);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        long newExp = amount;
+        int newLevel = staticDataManager.calculateLevel(contentId, newExp);
+
+        if (newExp != oldExp || newLevel != oldLevel) {
+            PlayerContentProgress updatedProgress = new PlayerContentProgress(contentId, data.getSeasonId(), newExp, newLevel);
+            data.setContentProgress(updatedProgress);
+
+            logger.logTransaction(playerUUID, "ContentExp", contentId, oldExp, newExp, reason);
+            if (newLevel != oldLevel) {
+                logger.logTransaction(playerUUID, "ContentLevel", contentId, oldLevel, newLevel, "Level Set via " + reason);
+                Player onlinePlayer = Bukkit.getPlayer(playerUUID);
+                if (onlinePlayer != null && onlinePlayer.isOnline()) {
+                    if (newLevel > oldLevel) {
+                        Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getPluginManager().callEvent(new PlayerContentLevelUpEvent(onlinePlayer, contentType, newLevel, oldLevel, reason)));
+                    } else {
+                        // Maybe add additional event ?
+                    }
+                }
+            }
+            return CompletableFuture.completedFuture(true);
+        }
+        return CompletableFuture.completedFuture(false);
+    }
+
+    /**
      * Sets the player's chosen job for the current season asynchronously.
      * Checks prerequisites, updates cache, logs transaction, and calls events on the main thread.
      * @param playerUUID The player's UUID.
@@ -325,6 +422,85 @@ public class Storage {
         data.setSeasonStats(updatedStats); // Updates cache and marks dirty
 
         logger.logTransaction(playerUUID, "SkillPoint", "Gain", oldPoints, newPoints, reason);
+
+        Player onlinePlayer = Bukkit.getPlayer(playerUUID);
+        if (onlinePlayer != null && onlinePlayer.isOnline()) {
+            Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getPluginManager().callEvent(new PlayerSkillPointsChangeEvent(onlinePlayer, newPoints, oldPoints, reason)));
+        }
+        return CompletableFuture.completedFuture(true);
+    }
+
+    /**
+     * Decreases the player's current season skill points. (Not processed asynchronously)
+     * If the player does not have enough points, the operation fails.
+     * @param playerUUID UUID of the player
+     * @param amount Amount of skill points to decrease (must be positive)
+     * @param reason Reason for the change
+     * @return true if successfully modified due to sufficient points, false otherwise
+     */
+    public CompletableFuture<Boolean> removeSkillPoints(UUID playerUUID, int amount, String reason) {
+        if (amount <= 0) {
+            logger.warn("Attempted to remove non-positive skill points: {}", amount);
+            return CompletableFuture.completedFuture(false);
+        }
+        if (isPlayerLoading(playerUUID)) { logger.warn("Attempted removeSkillPoints for {} while loading.", playerUUID); return CompletableFuture.completedFuture(false); }
+        if (!databaseHandler.isDataActive(playerUUID)) { logger.warn("Cannot removeSkillPoints for {} - data status not ACTIVE.", playerUUID); return CompletableFuture.completedFuture(false); }
+
+        PlayerSeasonData data = getCachedDataForModification(playerUUID);
+        if (data == null) return CompletableFuture.completedFuture(false);
+
+        PlayerSeasonStats currentStats = data.getSeasonStats().orElse(new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0, 1));
+        int oldPoints = currentStats.getSkillPoints();
+
+        if (oldPoints < amount) {
+            logger.debug("Player {} does not have enough skill points to remove {}. Has: {}", playerUUID, amount, oldPoints);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        int newPoints = oldPoints - amount;
+        PlayerSeasonStats updatedStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), currentStats.getChosenJobId().orElse(null), newPoints, currentStats.getClassValue());
+        data.setSeasonStats(updatedStats);
+
+        logger.logTransaction(playerUUID, "SkillPoint", "Loss", oldPoints, newPoints, reason);
+
+        Player onlinePlayer = Bukkit.getPlayer(playerUUID);
+        if (onlinePlayer != null && onlinePlayer.isOnline()) {
+            Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getPluginManager().callEvent(new PlayerSkillPointsChangeEvent(onlinePlayer, newPoints, oldPoints, reason)));
+        }
+        return CompletableFuture.completedFuture(true);
+    }
+
+    /**
+     * Sets the player's current season skill points to a specific value. (Not processed asynchronously)
+     * @param playerUUID UUID of the player
+     * @param amount Skill points to set (must be zero or positive)
+     * @param reason Reason for the change
+     * @return true if the data was successfully modified, false otherwise
+     */
+    public CompletableFuture<Boolean> setSkillPoints(UUID playerUUID, int amount, String reason) {
+        if (amount < 0) {
+            logger.warn("Attempted to set negative skill points: {}", amount);
+            return CompletableFuture.completedFuture(false);
+        }
+        if (isPlayerLoading(playerUUID)) { logger.warn("Attempted setSkillPoints for {} while loading.", playerUUID); return CompletableFuture.completedFuture(false); }
+        if (!databaseHandler.isDataActive(playerUUID)) { logger.warn("Cannot setSkillPoints for {} - data status not ACTIVE.", playerUUID); return CompletableFuture.completedFuture(false); }
+
+        PlayerSeasonData data = getCachedDataForModification(playerUUID);
+        if (data == null) return CompletableFuture.completedFuture(false);
+
+        PlayerSeasonStats currentStats = data.getSeasonStats().orElse(new PlayerSeasonStats(playerUUID, data.getSeasonId(), null, 0, 1));
+        int oldPoints = currentStats.getSkillPoints();
+
+        if (oldPoints == amount) {
+            logger.debug("Player {} skill points already set to {}. No change needed.", playerUUID, amount);
+            return CompletableFuture.completedFuture(false);
+        }
+
+        int newPoints = amount;
+        PlayerSeasonStats updatedStats = new PlayerSeasonStats(playerUUID, data.getSeasonId(), currentStats.getChosenJobId().orElse(null), newPoints, currentStats.getClassValue());
+        data.setSeasonStats(updatedStats);
+
+        logger.logTransaction(playerUUID, "SkillPoint", "Set", oldPoints, newPoints, reason);
 
         Player onlinePlayer = Bukkit.getPlayer(playerUUID);
         if (onlinePlayer != null && onlinePlayer.isOnline()) {
